@@ -5,10 +5,10 @@ Touch Point Visualizer
 Draws your touches on the screen. Also implements edge swipe actions.  
 X11 only. You should probably also have a compositor running.
 
-Dependencies are libx11, libxcomposite, libxi, and libevdev. Most desktops probably have these installed already.
+Dependencies are libx11, libxcomposite, libxi, libxfixes, and libevdev. Most desktops probably have these installed already.
 
 To build on Ubuntu-based distributions:  
-`sudo apt install libx11-dev libxcomposite-dev libxi-dev libevdev-dev gcc`  
+`sudo apt install libx11-dev libxcomposite-dev libxi-dev libxfixes-dev libevdev-dev gcc`  
 `/path/to/tpv.sh`
 
 Usage:
@@ -19,20 +19,30 @@ The format is just the option name followed by the value, separated by a space.
 Options are:
 * `device`  
 	Device ID of your touchscreen. May differ between input methods.  
-	If using libevdev, it's the number portion of `/dev/input/eventX`. If using xinput2, it's optional. If you don't set it, the program will catch touch events from all devices.  
+	If using libevdev, it's the number portion of `/dev/input/eventX`. If using `xinput2` for `inputmethod`, it's optional; if you don't set it, the program will catch touch events from all devices.  
 	Default is -1.
 * `fps`  
 	Framerate of the program. Should be set to your display's refresh rate for minimal flicker.  
 	Default is 60.
-* `outputmethod`  
+* `outputwindow`  
 	Possibilities are `none`, `root` and `compositeoverlay`.  
-	Specifies how to draw the output on the screen. Choosing `none` makes it not draw at all.  
+	Specifies what window to draw the output on. Choosing `none` makes it not draw at all.  
 	Default is `root`.
+* `clearmethod`  
+	Possibilities are `expose`, `cleararea`, and `exposeandcleararea`.  
+	Specifies how the program should clear what it has drawn.  
+	Default is `exposeandcleararea`.
 * `inputmethod`  
 	Possibilities are `libevdev` and `xinput2`.  
 	If you choose `libevdev`, the program needs to be able to access `/dev/input/eventX`.  
 	If you choose `xinput2`, pressure sensitivity won't be available.  
 	Default is `xinput2`.
+* `hidemouse`  
+	Hides the mouse on touch input and shows it on mouse input.  
+	Default is 1.
+* `mousedevice`  
+	The device to capture mouse events from. Only used if `hidemouse` is 1 and `inputmethod` is `libevdev`.  
+	Default is -1.
 * `fixedwidth`  
 	Whether or not the point should use a fixed width or get touch size info from `ABS_MT_TOUCH_MAJOR`.  
 	Pressure sensitivity is not available when using XInput2 for input.  
