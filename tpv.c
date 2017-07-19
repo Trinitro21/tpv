@@ -6,11 +6,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <math.h>
+#include <time.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/Xfixes.h>
+#include <X11/extensions/XTest.h>
 
 //settings
 int device=-1;//which device to read from, /dev/input/eventX if libevdev
@@ -29,6 +31,9 @@ int trailisshape=0;//line or shape
 int trailshape=0;//0=circle, 1=rectangle
 int hidemouse=1;//hides the mouse on touch
 int mousedevice=-1;//if using libevdev, how do i get at that mouse
+int rightclickonhold=1;//should the program simulate a rightclick if you hold for long enough
+int rightclicktime=1000;//how much time in milliseconds should the touch be held down for before a rightclick is triggered
+int shapechangeifrightclick=1;//if the shape of the touch visual should change if a rightclick will be triggered on touch lift
 int fps=60;//framerate so it aligns to your refresh rate hopefully
 int outputwindow=1;//0=none, 1=draw on root window, 2=draw on composite overlay window
 int clearmethod=2;//0=none, 1=xexposeevent, 2=xcleararea, 3=xexposeevent and xcleararea
@@ -73,9 +78,16 @@ int th;
 
 int **tx,**ty,**d,**r;//touch x, touch y, touch down, touch width
 
+//stores the timestamp of the initial touch
+struct timespec *timestamps,tsbuff;
+
 int mouseortouch=0,mouseortouchprev=0;//0=mouse,1=touch
 
 int sx,sy,ex,ey;//things of redraw area
+
+long tstomsec(struct timespec t){
+	return t.tv_sec*1000+t.tv_nsec/1000000;
+}
 
 int** init2d(){
 	int **thing;
@@ -154,6 +166,10 @@ void parseconfig(FILE * conf){
 			hidemouse=stringtoint(val);
 		if(strcmp("mousedevice",name)==0)
 			mousedevice=stringtoint(val);
+		if(strcmp("rightclickonhold",name)==0)
+			rightclickonhold=stringtoint(val);
+		if(strcmp("rightclicktime",name)==0)
+			rightclicktime=stringtoint(val);
 		if(strcmp("widthmult",name)==0)
 			widthmult=stringtoint(val);
 		if(strcmp("width",name)==0)
@@ -235,55 +251,66 @@ void parseconfig(FILE * conf){
 	}
 }
 
-void draw(int re){
+void draw(){
 	sx=-1;sy=-1;ex=-1;ey=-1;//init the bounding rect
+	if(rightclickonhold)
+		if(clock_gettime(CLOCK_MONOTONIC,&tsbuff)!=0)
+			fprintf(stderr,"There was an error getting the current timestamp\n");
 	for(i=0;i<tt;i++){
 		//get the values
-		if(!re){
-			if(inputmethod==0){
-				tx[0][i]=libevdev_get_slot_value(dev,i,53)*sw/tw;//get touch coordinatess
-				ty[0][i]=libevdev_get_slot_value(dev,i,54)*sh/th;
-				d[0][i]=(libevdev_get_slot_value(dev,i,57)!=-1);//is touch actually
-				if(fixedwidth==0){//if fixed width is off, adjust width
-					r[0][i]=libevdev_get_slot_value(dev,i,48)*widthmult;//what width is
-				}else{
-					r[0][i]=width;
-				}
+		if(inputmethod==0){
+			tx[0][i]=libevdev_get_slot_value(dev,i,53)*sw/tw;//get touch coordinatess
+			ty[0][i]=libevdev_get_slot_value(dev,i,54)*sh/th;
+			d[0][i]=(libevdev_get_slot_value(dev,i,57)!=-1);//is touch actually
+			if(fixedwidth==0){//if fixed width is off, adjust width
+				r[0][i]=libevdev_get_slot_value(dev,i,48)*widthmult;//what width is
+			}else{
+				r[0][i]=width;
 			}
-			if(d[0][i] && !d[1][i]){
-				tx[tlength-1][i]=tx[0][i];
-				ty[tlength-1][i]=ty[0][i];
-				r[tlength-1][i]=1;//tap threshold flag
-				d[tlength-1][i]=d[0][i];
-				//edge swipes
-				if(ty[tlength-1][i]<=edgeswipethreshold)
-					backgroundshell(edgeswipes[0]);
-				if(ty[tlength-1][i]>=sh-1-edgeswipethreshold)
-					backgroundshell(edgeswipes[1]);
-				if(tx[tlength-1][i]<=edgeswipethreshold)
-					backgroundshell(edgeswipes[2]);
-				if(tx[tlength-1][i]>=sw-1-edgeswipethreshold)
-					backgroundshell(edgeswipes[3]);
-			}
-			if(!d[0][i] && d[1][i]){//end edge swipe gestres
-				if(ty[tlength-1][i]<=edgeswipethreshold)
-					backgroundshell(edgeswipes[4]);
-				if(ty[tlength-1][i]>=sh-1-edgeswipethreshold)
-					backgroundshell(edgeswipes[5]);
-				if(tx[tlength-1][i]<=edgeswipethreshold)
-					backgroundshell(edgeswipes[6]);
-				if(tx[tlength-1][i]>=sw-1-edgeswipethreshold)
-					backgroundshell(edgeswipes[7]);
-			}
+		}
+		if(d[0][i] && !d[1][i]){
+			tx[tlength-1][i]=tx[0][i];
+			ty[tlength-1][i]=ty[0][i];
+			r[tlength-1][i]=1;//tap threshold flag
+			d[tlength-1][i]=d[0][i];
+			if(rightclickonhold)
+				timestamps[i]=tsbuff;
+			//edge swipes
+			if(ty[tlength-1][i]<=edgeswipethreshold)
+				backgroundshell(edgeswipes[0]);
+			if(ty[tlength-1][i]>=sh-1-edgeswipethreshold)
+				backgroundshell(edgeswipes[1]);
+			if(tx[tlength-1][i]<=edgeswipethreshold)
+				backgroundshell(edgeswipes[2]);
+			if(tx[tlength-1][i]>=sw-1-edgeswipethreshold)
+				backgroundshell(edgeswipes[3]);
+		}
+		if(!d[0][i] && d[1][i]){//end edge swipe gestres
+			if(ty[tlength-1][i]<=edgeswipethreshold)
+				backgroundshell(edgeswipes[4]);
+			if(ty[tlength-1][i]>=sh-1-edgeswipethreshold)
+				backgroundshell(edgeswipes[5]);
+			if(tx[tlength-1][i]<=edgeswipethreshold)
+				backgroundshell(edgeswipes[6]);
+			if(tx[tlength-1][i]>=sw-1-edgeswipethreshold)
+				backgroundshell(edgeswipes[7]);
 		}
 		if(d[0][i]){
 			if(sqrt((double)((tx[0][i]-tx[tlength-1][i])*(tx[0][i]-tx[tlength-1][i])+(ty[0][i]-ty[tlength-1][i])*(ty[0][i]-ty[tlength-1][i])))>=(double)tapthreshold)//check tap threshold
 				r[tlength-1][i]=0;
 			if(outputwindow!=0 && (shapeaftertap || r[tlength-1][i])){//should it draw the current touch
 				addtobound(tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,tx[0][i]+r[0][i]/2,ty[0][i]+r[0][i]/2);
-				if(shape==0)
+				//determin which shape the thing should be
+				ev=shape;
+				if(rightclickonhold && d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
+					if(ev==0)
+						ev=1;
+					else if(ev==1)
+						ev=0;
+				}
+				if(ev==0)
 					XDrawArc(disp,window,gc,tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,r[0][i],r[0][i],0,360*64);
-				if(shape==1)
+				if(ev==1)
 					XDrawRectangle(disp,window,gc,tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,r[0][i],r[0][i]);
 			}
 			if(outputwindow!=0 && trail && (trailduringtap || !r[tlength-1][i])){//should it draw the trail
@@ -306,15 +333,7 @@ void draw(int re){
 				}
 			}
 		}
-		if(!re)
-			for(j=traillength*traildispersion-1;j>=0;j--){//advance the buffer
-				tx[j+1][i]=tx[j][i];
-				ty[j+1][i]=ty[j][i];
-				r[j+1][i]=r[j][i];
-				d[j+1][i]=d[j][i];
-			}
 	}
-	
 }
 
 int main(int argc, char **argv){
@@ -327,6 +346,7 @@ int main(int argc, char **argv){
 		fclose(config);
 	}
 	tlength=traillength*traildispersion+2;
+	if(tlength==2)tlength=3;//have at least one prevtouch stored
 	//traillength*traildispersion+2 because the first slot stores the current touch, there are traillength*traildispersion more that are part of the trail, and the last one holds the initial conditions of the touch
 	
 	//set up x stuff
@@ -348,10 +368,17 @@ int main(int argc, char **argv){
 		window=root;
 	else if(outputwindow==2){
 		if(!XQueryExtension(disp,"Composite",&i,&j,&ev)){//i, j, ev because they're unused ints at the moment
-			fprintf(stderr,"XComposite extension not available");
+			fprintf(stderr,"XComposite extension not available\n");
 			exit(1);
 		}
 		window=XCompositeGetOverlayWindow(disp,root);
+	}
+	
+	if(rightclickonhold){
+		if(!XQueryExtension(disp,"XTEST",&i,&j,&ev)){//i, j, ev because they're unused ints at the moment
+			fprintf(stderr,"XTEST extension not available\n");
+			exit(1);
+		}
 	}
 	
 	if(inputmethod==0){//use libevdev
@@ -401,25 +428,30 @@ int main(int argc, char **argv){
 			fprintf(stderr,"XInput is too old to support touch\n");
 			exit(1);
 		}
-		//why is this so hard to find info on
-		//i just wanna passive grab all touches just please
 		XIEventMask xiem[2];
 		XIEventMask *mask;
 		mask=&xiem[0];
-		mask->deviceid=(device==-1?XIAllMasterDevices:device);
+		mask->deviceid=((device==-1)?XIAllMasterDevices:device);
 		mask->mask_len=XIMaskLen(XI_LASTEVENT);
 		mask->mask=calloc(mask->mask_len,sizeof(char));
 		XISetMask(mask->mask,XI_RawTouchBegin);
 		XISetMask(mask->mask,XI_RawTouchUpdate);
 		XISetMask(mask->mask,XI_RawTouchEnd);
-		if(hidemouse)
+		if(hidemouse==1){
+			if(mousedevice!=device){
+				mask=&xiem[1];
+				mask->deviceid=((mousedevice==-1)?XIAllMasterDevices:mousedevice);
+				mask->mask_len=XIMaskLen(XI_LASTEVENT);
+				mask->mask=calloc(mask->mask_len,sizeof(char));
+			}
 			XISetMask(mask->mask,XI_RawMotion);
-		XISelectEvents(disp,root,&xiem[0],1);
+		}
+		XISelectEvents(disp,root,&xiem[0],((hidemouse==1 && mousedevice!=device)?2:1));
 		XSync(disp,False);
 		tt=10;//just gonna uh do that
 		//i don't feel like learning how to scan devices and pick out the number of touches from stuff
 		//you're not going to have more than 10 touches typically anyways ok
-		//and even if i did learn, there's an option for unlimited touches
+		//and even if i did learn, there's an option for unlimited touches so it would get really complex fast
 	}
 	
 	//init touch arrays
@@ -427,9 +459,10 @@ int main(int argc, char **argv){
 	ty=init2d();//y
 	d=init2d();//is touched
 	r=init2d();//width
-	//on the last index, r will be used as a switch for tapthreshold
+	timestamps=calloc(tt,sizeof(struct timespec));
+	//on the last index, r will be used as a switch for tapthreshold and d will be used as a switch for detecting if only one button has been held for the entire touch
 	
-	if(clearmethod==1){
+	if(clearmethod==1 || clearmethod==3){
 		//set up expose event
 		xev.type=Expose;
 		xev.serial=0;
@@ -504,13 +537,40 @@ int main(int argc, char **argv){
 		}
 		//draw the things
 		draw(0);
+		
+ 		//hide/show mouse
 		if(mouseortouch && !mouseortouchprev)
 			XFixesHideCursor(disp,window);
 		if(!mouseortouch && mouseortouchprev)
 			XFixesShowCursor(disp,window);
+		
+		//rightclick on tap hold
+		if(rightclickonhold){
+			if(d[0][0]){
+				for(i=1;i<tt && !d[0][i];i++){}//check if all the other touches are not held down
+				if(i<tt)
+					d[tlength-1][0]=0;
+			}
+			if(!d[0][0] && d[1][0]){
+				if(d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
+					XTestFakeButtonEvent(disp,3,True,0);
+					XTestFakeButtonEvent(disp,3,False,0);
+				}
+			}
+		}
+		
 		mouseortouchprev=mouseortouch;
 		
 		XFlush(disp);
+		
+		//advance the buffer
+		for(i=0;i<tt;i++)
+			for(j=tlength-3;j>=0;j--){
+				tx[j+1][i]=tx[j][i];
+				ty[j+1][i]=ty[j][i];
+				r[j+1][i]=r[j][i];
+				d[j+1][i]=d[j][i];
+			}
 		
 		waitpid((pid_t)-1,&ev,WNOHANG);//stupid zombies
 		if(fps!=0)
@@ -527,18 +587,10 @@ int main(int argc, char **argv){
 					XSendEvent(disp,window,True,ExposureMask,(XEvent*)&xev);
 				}
 			if(clearmethod==2 || clearmethod==3){
-				if(ex-sx!=0 && ey-sy!=0)
+				if(ex-sx!=0 && ey-sy!=0){
 					XClearArea(disp,window,sx,sy,ex-sx,ey-sy,True);
-				//and if 3 then rexexpose because why not
-				if(clearmethod==3)
-					if(ex-sx>0 && ey-sy>0){
-						xev.x=sx;
-						xev.y=sy;
-						xev.width=ex-sx;
-						xev.height=ey-sy;
-						XSendEvent(disp,window,True,ExposureMask,(XEvent*)&xev);
-					}
-				XFlush(disp);
+					XFlush(disp);
+				}
 			}
 		}
 	}
