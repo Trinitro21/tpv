@@ -2,13 +2,13 @@
 
 Touch Point Visualizer
 
-Draws your touches on the screen. Also implements edge swipe actions.  
+Draws your touches on the screen. Also implements edge swipe actions, mouse hiding on touch, and touch hold to rightclick.  
 X11 only. You should probably also have a compositor running.
 
-Dependencies are libx11, libxcomposite, libxi, libxfixes, and libevdev. Most desktops probably have these installed already.
+Dependencies are libx11, libxcomposite, libxi, libxfixes, libxtst and libevdev. Most desktops probably have these installed already.
 
 To build on Ubuntu-based distributions:  
-`sudo apt install libx11-dev libxcomposite-dev libxi-dev libxfixes-dev libevdev-dev gcc`  
+`sudo apt install libx11-dev libxcomposite-dev libxi-dev libxfixes-dev libxtst-dev libevdev-dev gcc`  
 `/path/to/tpv.sh`
 
 Usage:
@@ -16,6 +16,7 @@ Usage:
 
 If the file exists, it reads its settings from `~/.config/tpv.cfg`.  
 The format is just the option name followed by the value, separated by a space.  
+If a line does not start with one of the following options, it is ignored.  
 Options are:
 * `device`  
 	Device ID of your touchscreen. May differ between input methods.  
@@ -43,6 +44,15 @@ Options are:
 * `mousedevice`  
 	The device to capture mouse events from. Only used if `hidemouse` is 1 and `inputmethod` is `libevdev`.  
 	Default is -1.
+* `rightclickonhold`  
+	Whether the program should emulate rightclicks when one finger is held in place for more than the specified time interval.  
+	Default is 1.
+* `rightclicktime`  
+	The time interval, in milliseconds, a touch has to be held for in order for a rightclick to be generated when the finger is lifted.  
+	Default is 1000.
+* `shapechangeifrightclick`  
+	Whether the shape of the current touch should change if a rightclick will be triggered when the finger is lifted.  
+	Default is 1.
 * `fixedwidth`  
 	Whether or not the point should use a fixed width or get touch size info from `ABS_MT_TOUCH_MAJOR`.  
 	Pressure sensitivity is not available when using XInput2 for input.  
