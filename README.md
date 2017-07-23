@@ -14,10 +14,12 @@ To build on Ubuntu-based distributions:
 Usage:
 `/path/to/tpv`
 
-If the file exists, it reads its settings from `~/.config/tpv.cfg`.  
+# Options
+
+If the file exists, the program reads its settings from `~/.config/tpv.cfg`.  
 The format is just the option name followed by the value, separated by a space.  
 If a line does not start with one of the following options, it is ignored.  
-Options are:
+
 * `device`  
 	Device ID of your touchscreen. May differ between input methods.  
 	If using libevdev, it's the number portion of `/dev/input/eventX`. If using `xinput2` for `inputmethod`, it's optional; if you don't set it, the program will catch touch events from all devices.  
@@ -104,3 +106,14 @@ Options are:
 * `edgetopend`, `edgebottomend`, `edgeleftend`, `edgerightend`  
 	The command to run when a slide from the corresponding edge of the screen is lifted, so that the mouse position change doesn't interfere with the script.  
 	Default is an empty string.
+
+# Issues / To do
+
+* Redraw events don't work, even with all the possible `clearmethod` values. This leads to the shapes drawn staying on screen until the application or the compositor redraws the screen.
+
+* Some applications implement their own version of this application's rightclickonhold. Possibly there could be a blacklist of which applications should be excluded from the gesture.  
+	This would require the application to figure out which window the cursor is currently over, get its application class, and compare that to a list.
+
+* Sometimes the touch from a swipe starts being registered far inside the screen. Perhaps the program could extrapolate the touch position at the frame before it started with a linear algorithm and use that value to determine if the touch started from the edge. This would occur at the second frame of the touch rather than the first.
+
+* Edge swipe gestures trigger when any touch starts from the edge. It could be limited to the first finger only.
