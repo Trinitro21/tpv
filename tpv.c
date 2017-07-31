@@ -13,6 +13,7 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/XTest.h>
+#include <X11/Xutil.h>
 
 //settings
 int device=-1;//which device to read from, /dev/input/eventX if libevdev
@@ -30,7 +31,8 @@ int traildispersion=1;//how many frames away should those points be
 int trailisshape=0;//line or shape
 int trailshape=0;//0=circle, 1=rectangle
 int hidemouse=1;//hides the mouse on touch
-int mousedevice=-1;//if using libevdev, how do i get at that mouse
+int mousedevice=-1;//how do i get at that mouse
+int buttonlisten=1;//if xinput2 should the mouse buttons be listened to (if yes it will show mouse on the rightclickonhold)
 int rightclickonhold=1;//should the program simulate a rightclick if you hold for long enough
 int rightclicktime=1000;//how much time in milliseconds should the touch be held down for before a rightclick is triggered
 int shapechangeifrightclick=1;//if the shape of the touch visual should change if a rightclick will be triggered on touch lift
@@ -40,6 +42,7 @@ int clearmethod=2;//0=none, 1=xexposeevent, 2=xcleararea, 3=xexposeevent and xcl
 int inputmethod=1;//0=libevdev, 1=XInput2
 char *edgeswipes[8];//top, bottom, left, right
 int edgeswipethreshold=1;//how many units away from the edge of the screen does the touch have to start at to be considered an edge swipe
+int edgeswipeextrapolate=1;//should the program extrapolate the touch at the frame before the first touch frame to determine if the touch is an edge swipe
 
 FILE * config;
 char *configpath="/.config/tpv";
@@ -80,6 +83,7 @@ int **tx,**ty,**d,**r;//touch x, touch y, touch down, touch width
 
 //stores the timestamp of the initial touch
 struct timespec *timestamps,tsbuff;
+int es;//flags for edgeswipes so it can tell on the last frame of a touch if the touch was an edge swipe ok
 
 int mouseortouch=0,mouseortouchprev=0;//0=mouse,1=touch
 
@@ -135,15 +139,21 @@ int touchnumfromdetail(int detail){
 }
 
 int stringtoint(char string[]){
-	unsigned int result=0,i;
+	int result=0,i,neg=0;
 	for(i=0;i<strlen(string);i++){
 		if(string[i]==10)continue;
+		if(i==0 && string[i]=='-'){
+			neg=1;
+			continue;
+		}
 		if(string[i]<'0' || string[i]>'9'){
 			printf("Invalid character '%s' (%d) in '%s', expected number\n",&string[i],string[i],string);
 			exit(1);
 		}
 		result=result*10+string[i]-'0';
 	}
+	if(neg)
+		result*=-1;
 	return result;
 }
 
@@ -166,6 +176,8 @@ void parseconfig(FILE * conf){
 			hidemouse=stringtoint(val);
 		if(strcmp("mousedevice",name)==0)
 			mousedevice=stringtoint(val);
+		if(strcmp("buttonlisten",name)==0)
+			buttonlisten=stringtoint(val);
 		if(strcmp("rightclickonhold",name)==0)
 			rightclickonhold=stringtoint(val);
 		if(strcmp("rightclicktime",name)==0)
@@ -253,52 +265,9 @@ void parseconfig(FILE * conf){
 
 void draw(){
 	sx=-1;sy=-1;ex=-1;ey=-1;//init the bounding rect
-	if(rightclickonhold)
-		if(clock_gettime(CLOCK_MONOTONIC,&tsbuff)!=0)
-			fprintf(stderr,"There was an error getting the current timestamp\n");
 	for(i=0;i<tt;i++){
-		//get the values
-		if(inputmethod==0){
-			tx[0][i]=libevdev_get_slot_value(dev,i,53)*sw/tw;//get touch coordinatess
-			ty[0][i]=libevdev_get_slot_value(dev,i,54)*sh/th;
-			d[0][i]=(libevdev_get_slot_value(dev,i,57)!=-1);//is touch actually
-			if(fixedwidth==0){//if fixed width is off, adjust width
-				r[0][i]=libevdev_get_slot_value(dev,i,48)*widthmult;//what width is
-			}else{
-				r[0][i]=width;
-			}
-		}
-		if(d[0][i] && !d[1][i]){
-			tx[tlength-1][i]=tx[0][i];
-			ty[tlength-1][i]=ty[0][i];
-			r[tlength-1][i]=1;//tap threshold flag
-			d[tlength-1][i]=d[0][i];
-			if(rightclickonhold)
-				timestamps[i]=tsbuff;
-			//edge swipes
-			if(ty[tlength-1][i]<=edgeswipethreshold)
-				backgroundshell(edgeswipes[0]);
-			if(ty[tlength-1][i]>=sh-1-edgeswipethreshold)
-				backgroundshell(edgeswipes[1]);
-			if(tx[tlength-1][i]<=edgeswipethreshold)
-				backgroundshell(edgeswipes[2]);
-			if(tx[tlength-1][i]>=sw-1-edgeswipethreshold)
-				backgroundshell(edgeswipes[3]);
-		}
-		if(!d[0][i] && d[1][i]){//end edge swipe gestres
-			if(ty[tlength-1][i]<=edgeswipethreshold)
-				backgroundshell(edgeswipes[4]);
-			if(ty[tlength-1][i]>=sh-1-edgeswipethreshold)
-				backgroundshell(edgeswipes[5]);
-			if(tx[tlength-1][i]<=edgeswipethreshold)
-				backgroundshell(edgeswipes[6]);
-			if(tx[tlength-1][i]>=sw-1-edgeswipethreshold)
-				backgroundshell(edgeswipes[7]);
-		}
 		if(d[0][i]){
-			if(sqrt((double)((tx[0][i]-tx[tlength-1][i])*(tx[0][i]-tx[tlength-1][i])+(ty[0][i]-ty[tlength-1][i])*(ty[0][i]-ty[tlength-1][i])))>=(double)tapthreshold)//check tap threshold
-				r[tlength-1][i]=0;
-			if(outputwindow!=0 && (shapeaftertap || r[tlength-1][i])){//should it draw the current touch
+			if(shapeaftertap || r[tlength-1][i]){//should it draw the current touch
 				addtobound(tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,tx[0][i]+r[0][i]/2,ty[0][i]+r[0][i]/2);
 				//determin which shape the thing should be
 				ev=shape;
@@ -313,7 +282,7 @@ void draw(){
 				if(ev==1)
 					XDrawRectangle(disp,window,gc,tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,r[0][i],r[0][i]);
 			}
-			if(outputwindow!=0 && trail && (trailduringtap || !r[tlength-1][i])){//should it draw the trail
+			if(trail && (trailduringtap || !r[tlength-1][i])){//should it draw the trail
 				for(j=traildispersion;j<tlength-1;j+=traildispersion){
 					if(!d[j][i])
 						break;
@@ -346,7 +315,7 @@ int main(int argc, char **argv){
 		fclose(config);
 	}
 	tlength=traillength*traildispersion+2;
-	if(tlength==2)tlength=3;//have at least one prevtouch stored
+	if(tlength<4)tlength=4;//have at least two prevtouches stored
 	//traillength*traildispersion+2 because the first slot stores the current touch, there are traillength*traildispersion more that are part of the trail, and the last one holds the initial conditions of the touch
 	
 	//set up x stuff
@@ -364,7 +333,7 @@ int main(int argc, char **argv){
 	screenvisual=DefaultVisual(disp,screen);
 	
 	root=RootWindow(disp,screen);
-	if(outputwindow==1)
+	if(outputwindow==1 || outputwindow==0)//if 0 set it to root just to have it defined and for other things
 		window=root;
 	else if(outputwindow==2){
 		if(!XQueryExtension(disp,"Composite",&i,&j,&ev)){//i, j, ev because they're unused ints at the moment
@@ -445,6 +414,8 @@ int main(int argc, char **argv){
 				mask->mask=calloc(mask->mask_len,sizeof(char));
 			}
 			XISetMask(mask->mask,XI_RawMotion);
+			if(buttonlisten)
+				XISetMask(mask->mask,XI_RawButtonPress);
 		}
 		XISelectEvents(disp,root,&xiem[0],((hidemouse==1 && mousedevice!=device)?2:1));
 		XSync(disp,False);
@@ -464,6 +435,7 @@ int main(int argc, char **argv){
 	
 	if(clearmethod==1 || clearmethod==3){
 		//set up expose event
+		memset(&xev,0,sizeof(xev));
 		xev.type=Expose;
 		xev.serial=0;
 		xev.send_event=True;
@@ -483,6 +455,12 @@ int main(int argc, char **argv){
 	}
 	
 	while(1){
+		//get the time ok
+		if(rightclickonhold)
+			if(clock_gettime(CLOCK_MONOTONIC,&tsbuff)!=0)
+				fprintf(stderr,"There was an error getting the current timestamp\n");
+		
+		//get input
 		if(inputmethod==0){
 			if(hidemouse)
 				do{//make sure libevdev is completely updated on the mouse events
@@ -501,6 +479,11 @@ int main(int argc, char **argv){
 				if(xevent.xcookie.type==GenericEvent && xevent.xcookie.extension==xiopcode && XGetEventData(disp,&xevent.xcookie)){
 					xiev=xevent.xcookie.data;
 					switch(xevent.xcookie.evtype){
+						case XI_RawButtonPress:
+						case XI_RawMotion:
+							if(xevent.xcookie.evtype==XI_RawMotion || (xevent.xcookie.evtype==XI_RawButtonPress && (xiev->detail==1 || xiev->detail==2 || xiev->detail==3)))
+								mouseortouch=0;
+							break;
 						case XI_TouchBegin:
 						case XI_TouchUpdate:
 							if((tindex=touchnumfromdetail(xiev->detail))<0)
@@ -527,34 +510,101 @@ int main(int argc, char **argv){
 								break;
 							d[0][tindex]=0;
 							break;
-						case XI_RawMotion:
-							mouseortouch=0;
-							break;
 					}
 				}
 				XFreeEventData(disp,&xevent.xcookie);
 			}
 		}
-		//draw the things
-		draw(0);
+		for(i=0;i<tt;i++){
+			//get the values if libevdev
+			if(inputmethod==0){
+				tx[0][i]=libevdev_get_slot_value(dev,i,53)*sw/tw;//get touch coordinatess
+				ty[0][i]=libevdev_get_slot_value(dev,i,54)*sh/th;
+				d[0][i]=(libevdev_get_slot_value(dev,i,57)!=-1);//is touch actually
+				if(fixedwidth==0){//if fixed width is off, adjust width
+					r[0][i]=libevdev_get_slot_value(dev,i,48)*widthmult;//what width is
+				}else{
+					r[0][i]=width;
+				}
+			}
+			if(d[0][i] && !d[1][i]){
+				//thing to store info about touch start
+				tx[tlength-1][i]=tx[0][i];
+				ty[tlength-1][i]=ty[0][i];
+				r[tlength-1][i]=1;//tap threshold flag
+				d[tlength-1][i]=d[0][i];
+				if(rightclickonhold)
+					timestamps[i]=tsbuff;
+			}
+			if(d[0][i])//tap threshold
+				if(sqrt((double)((tx[0][i]-tx[tlength-1][i])*(tx[0][i]-tx[tlength-1][i])+(ty[0][i]-ty[tlength-1][i])*(ty[0][i]-ty[tlength-1][i])))>=(double)tapthreshold)//check tap threshold
+					r[tlength-1][i]=0;
+		}
 		
- 		//hide/show mouse
-		if(mouseortouch && !mouseortouchprev)
-			XFixesHideCursor(disp,window);
-		if(!mouseortouch && mouseortouchprev)
-			XFixesShowCursor(disp,window);
+		//draw the things
+		if(outputwindow!=0)
+			draw(0);
+		
+		//edge swipes
+		//if edgeswipeextrapolate, start on the second frame of the touch, else start on the first frame of touch
+		if(d[0][0] && (edgeswipeextrapolate?(d[1][0] && !d[2][0]):(!d[1][0])) && d[tlength-1][0]){
+			int exx=tx[1][0]-(edgeswipeextrapolate?tx[0][0]-tx[1][0]:0),//if edgeswipeextrapolate try to guess the touch at the frame before
+				exy=ty[1][0]-(edgeswipeextrapolate?ty[0][0]-ty[1][0]:0);//extrapolating the touch helps for faster swipes
+			es=0;
+			if(exy<=edgeswipethreshold){
+				es|=1;//set the flag so the program doesn't have to go through this again when the touch ends
+				backgroundshell(edgeswipes[0]);//then execute the configured command
+			}
+			if(exy>=sh-1-edgeswipethreshold){
+				es|=2;
+				backgroundshell(edgeswipes[1]);
+			}
+			if(exx<=edgeswipethreshold){
+				es|=4;
+				backgroundshell(edgeswipes[2]);
+			}
+			if(exx>=sw-1-edgeswipethreshold){
+				es|=8;
+				backgroundshell(edgeswipes[3]);
+			}
+		}
+		//end edge swipe gestures
+		//only trigger when the touch has ended and only the first finger has been down for the whole touch
+		if(!d[0][0] && d[1][0] && d[tlength-1][0]){
+			if(es&1)
+				backgroundshell(edgeswipes[4]);
+			if(es&2)
+				backgroundshell(edgeswipes[5]);
+			if(es&4)
+				backgroundshell(edgeswipes[6]);
+			if(es&8)
+				backgroundshell(edgeswipes[7]);
+		}
+		
+		//hide/show mouse
+		if(hidemouse){
+			if(mouseortouch && !mouseortouchprev)
+				XFixesHideCursor(disp,window);
+			if(!mouseortouch && mouseortouchprev)
+				XFixesShowCursor(disp,window);
+		}
+		
+		if(d[0][0] && d[tlength-1][0]){
+			for(i=1;i<tt && !d[0][i];i++){}//check if all the other touches are not held down
+			if(i<tt)
+				d[tlength-1][0]=0;
+		}
 		
 		//rightclick on tap hold
 		if(rightclickonhold){
-			if(d[0][0]){
-				for(i=1;i<tt && !d[0][i];i++){}//check if all the other touches are not held down
-				if(i<tt)
-					d[tlength-1][0]=0;
-			}
-			if(!d[0][0] && d[1][0]){
+			if(!d[0][0] && d[1][0]){//if the touch was just let go
+				//d[tlength-1][0] is the flag that means only the first finger has been held down the entire time
+				//r[tlength-1][0] is the flag that means the finger hasn't moved outside the tap threshold
+				//timestamps[0] is the stored time of the beginning of the touch
+				//then just compare the difference in times to the rightclicktime setting
 				if(d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
-					XTestFakeButtonEvent(disp,3,True,0);
-					XTestFakeButtonEvent(disp,3,False,0);
+					XTestFakeButtonEvent(disp,3,True,0);//rightclick down
+					XTestFakeButtonEvent(disp,3,False,0);//rightclick up
 				}
 			}
 		}
@@ -584,14 +634,16 @@ int main(int argc, char **argv){
 					xev.y=sy;
 					xev.width=ex-sx;
 					xev.height=ey-sy;
-					XSendEvent(disp,window,True,ExposureMask,(XEvent*)&xev);
+					XSendEvent(disp,window,False,ExposureMask,(XEvent*)&xev);
+					XFlush(disp);
 				}
 			if(clearmethod==2 || clearmethod==3){
 				if(ex-sx!=0 && ey-sy!=0){
+					XClearWindow(disp,window);
 					XClearArea(disp,window,sx,sy,ex-sx,ey-sy,True);
-					XFlush(disp);
 				}
 			}
+			XFlush(disp);
 		}
 	}
 	
