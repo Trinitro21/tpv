@@ -43,6 +43,9 @@ If a line does not start with one of the following options, it is ignored.
 * `hidemouse`  
 	Hides the mouse on touch input and shows it on mouse input.  
 	Default is 1.
+* `buttonlisten`  
+	When `rightclickonhold` is activated, the mouse button press can cause the mouse to be shown. This option simply sets whether mouse buttons should be detected when `inputmethod` is `xinput2`.  
+	Default is 1.
 * `mousedevice`  
 	The device to capture mouse events from. Only used if `hidemouse` is 1 and `inputmethod` is `libevdev`.  
 	Default is -1.
@@ -100,6 +103,10 @@ If a line does not start with one of the following options, it is ignored.
 * `edgeswipethreshold`  
 	How far away from the edges of the screen a touch has to start to be considered an edge swipe.  
 	Default is 1.
+* `edgeswipeextrapolate`  
+	If this is on, the start edge swipe check starts on the second frame of the touch and tries to extrapolate the finger position on the frame before the touch started.  
+	This is more accurate and detects fast swipes more efficiently.  
+	Default is 1.
 * `edgetop`, `edgebottom`, `edgeleft`, `edgeright`  
 	The command to run when sliding from the corresponding edge of the screen.  
 	Default is an empty string.
@@ -113,7 +120,3 @@ If a line does not start with one of the following options, it is ignored.
 
 * Some applications implement their own version of this application's rightclickonhold. Possibly there could be a blacklist of which applications should be excluded from the gesture.  
 	This would require the application to figure out which window the cursor is currently over, get its application class, and compare that to a list.
-
-* Sometimes the touch from a swipe starts being registered far inside the screen. Perhaps the program could extrapolate the touch position at the frame before it started with a linear algorithm and use that value to determine if the touch started from the edge. This would occur at the second frame of the touch rather than the first.
-
-* Edge swipe gestures trigger when any touch starts from the edge. It could be limited to the first finger only.
