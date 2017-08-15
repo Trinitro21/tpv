@@ -16,7 +16,7 @@ Usage:
 
 # Options
 
-If the file exists, the program reads its settings from `~/.config/tpv.cfg`.  
+If the file exists, the program reads its settings from `~/.config/tpv`.  
 The format is just the option name followed by the value, separated by a space.  
 If a line does not start with one of the following options, it is ignored.  
 
