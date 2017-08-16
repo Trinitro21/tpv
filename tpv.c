@@ -81,6 +81,8 @@ int th;
 
 int **tx,**ty,**d,**r;//touch x, touch y, touch down, touch width
 
+int **tmax;//for storing device max values in xinput2
+
 //stores the timestamp of the initial touch
 struct timespec *timestamps,tsbuff;
 int es;//flags for edgeswipes so it can tell on the last frame of a touch if the touch was an edge swipe ok
@@ -89,11 +91,11 @@ int mouseortouch=0,mouseortouchprev=0;//0=mouse,1=touch
 
 int sx,sy,ex,ey;//things of redraw area
 
-long tstomsec(struct timespec t){
+long tstomsec(struct timespec t){//convert timespec to milliseconds
 	return t.tv_sec*1000+t.tv_nsec/1000000;
 }
 
-int** init2d(){
+int** init2d(){//used to initialize 2d arrays
 	int **thing;
 	thing=(int **)malloc(sizeof(int*)*tlength);
 	for(i=0;i<tlength;i++)
@@ -112,7 +114,7 @@ void addtobound(int x,int y,int x2,int y2){
 	if(ey==-1||ey<y2)ey=y2+2;
 }
 
-void backgroundshell(char string[]){
+void backgroundshell(char string[]){//run a command in a fork
 	if(string!=NULL && strcmp(string,"\n") && strcmp(string,"")){//if the command isn't blank
 		pid_t pid=fork();//run in background so nonblocking
 		if(pid<0){
@@ -124,7 +126,7 @@ void backgroundshell(char string[]){
 	}
 }
 
-int touchnumfromdetail(int detail){
+int touchnumfromdetail(int detail){//get the finger of a touch from the detail provided by the xinput2 event
 	int i;
 	for(i=0;i<tt;i++)
 		if(currentd[i]==detail)
@@ -138,7 +140,49 @@ int touchnumfromdetail(int detail){
 	return -1;//oh no what
 }
 
-int stringtoint(char string[]){
+void touchmax(int dev,int* xmax,int* ymax){//get the maximum value of the touch axes
+	int i;
+	for(i=0;i<4;i++)//if it's stored already
+		if(tmax[i][0]==dev){
+			*xmax=tmax[i][1];
+			*ymax=tmax[i][2];
+			return;
+		}
+	int ndev;
+	XIDeviceInfo* xdev=XIQueryDevice(disp,dev,&ndev);//get the device info
+	for(i=0;i<xdev->num_classes;i++){//iterate through classes
+		if(xdev->classes[i]->type!=XIValuatorClass)//touch axes are valuators
+			continue;
+		XIValuatorClassInfo *val=(XIValuatorClassInfo*)xdev->classes[i];//cast
+		if(!val->label)
+			continue;
+		char* label=XGetAtomName(disp,val->label);//get the label of the class
+		if(strcmp("Abs MT Position X",label)==0){
+			*xmax=(int)val->max;
+			int j;
+			for(j=0;j<4;j++){//store the value so the program doesn't have to get the device info every frame
+				if(tmax[j][0]==dev || tmax[j][0]==-1){
+					tmax[j][0]=dev;
+					tmax[j][1]=*xmax;
+					break;
+				}
+			}
+		}
+		if(strcmp("Abs MT Position Y",label)==0){
+			*ymax=(int)val->max;
+			int j;
+			for(j=0;j<4;j++){
+				if(tmax[j][0]==dev || tmax[j][0]==-1){
+					tmax[j][0]=dev;
+					tmax[j][2]=*ymax;
+					break;
+				}
+			}
+		}
+	}
+}
+
+int stringtoint(char string[]){//convert a string to an integer
 	int result=0,neg=0;
 	unsigned int i;
 	for(i=0;i<strlen(string);i++){
@@ -158,7 +202,7 @@ int stringtoint(char string[]){
 	return result;
 }
 
-void stringtoedgeswipes(char string[],int index){
+void stringtoedgeswipes(char string[],int index){//just put the string into the edgeswipes array
 	edgeswipes[index]=malloc(strlen(string)+1);
 	strcpy(edgeswipes[index],string);
 }
@@ -264,7 +308,7 @@ void parseconfig(FILE * conf){
 	}
 }
 
-void draw(){
+void draw(){//handles all of the actual drawing each frame
 	sx=-1;sy=-1;ex=-1;ey=-1;//init the bounding rect
 	for(i=0;i<tt;i++){
 		if(d[0][i]){
@@ -424,6 +468,13 @@ int main(int argc, char **argv){
 		//i don't feel like learning how to scan devices and pick out the number of touches from stuff
 		//you're not going to have more than 10 touches typically anyways ok
 		//and even if i did learn, there's an option for unlimited touches so it would get really complex fast
+		
+		//now set up the array for storing touch maxes
+		tmax=(int **)malloc(sizeof(int*)*4);//i think 4's a good length, i don't think there will be any situation with more than 4 touchscreens at once
+		for(i=0;i<4;i++){
+			tmax[i]=(int *)calloc(3,sizeof(int));//device id, xmax, ymax
+			tmax[i][0]=-1;//init
+		}
 	}
 	
 	//init touch arrays
@@ -499,11 +550,12 @@ int main(int argc, char **argv){
 						case XI_RawTouchUpdate:
 							if((tindex=touchnumfromdetail(xiev->detail))<0)
 								break;
+							int xmax,ymax;
+							touchmax(xiev->sourceid,&xmax,&ymax);
 							d[0][tindex]=1;
 							r[0][tindex]=width;
-							tx[0][tindex]=xiev->event_x*sw/65535;//the max value of a touch axis seems to always be 65535 for libinput
-							ty[0][tindex]=xiev->event_y*sh/65535;//i have no idea how to get this programmatically
-							//my best guess would be to get the device id and search for Abs MT Position X and Abs MT Position Y in the valuators
+							tx[0][tindex]=xiev->event_x*sw/xmax;
+							ty[0][tindex]=xiev->event_y*sh/ymax;
 							mouseortouch=1;
 							break;
 						case XI_TouchEnd:
