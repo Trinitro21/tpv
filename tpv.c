@@ -38,7 +38,7 @@ int rightclicktime=1000;//how much time in milliseconds should the touch be held
 int shapechangeifrightclick=1;//if the shape of the touch visual should change if a rightclick will be triggered on touch lift
 int fps=60;//framerate so it aligns to your refresh rate hopefully
 int outputwindow=1;//0=none, 1=draw on root window, 2=draw on composite overlay window
-int clearmethod=2;//0=none, 1=xexposeevent, 2=xcleararea, 3=xexposeevent and xcleararea
+int clearmethod=3;//0=none, 1=xexposeevent, 2=xcleararea, 3=xexposeevent and xcleararea
 int inputmethod=1;//0=libevdev, 1=XInput2
 char *edgeswipes[8];//top, bottom, left, right
 int edgeswipethreshold=1;//how many units away from the edge of the screen does the touch have to start at to be considered an edge swipe
@@ -57,10 +57,10 @@ XIDeviceEvent *xiev;
 int *currentd,tindex;
 
 int f;//file for libevdev
+char filepath[30];//holds the filepath
 int ev=1;//holds the return value for getting the event
 int tt;//how many touches are available
 int tlength;//size of touch array, (traillength*traildispersion+2)
-char filepath[20];//holds the filepath
 struct input_event e;
 
 XExposeEvent xev;
@@ -102,14 +102,14 @@ int** init2d(){
 }
 
 void addtobound(int x,int y,int x2,int y2){
-	if(sx==-1||sx>x)sx=x-1;
-	if(sx==-1||sx>x2)sx=x2-1;
-	if(sy==-1||sy>y)sy=y-1;
-	if(sy==-1||sy>y2)sy=y2-1;
-	if(ex==-1||ex<x)ex=x+1;
-	if(ex==-1||ex<x2)ex=x2+1;
-	if(ey==-1||ey<y)ey=y+1;
-	if(ey==-1||ey<y2)ey=y2+1;
+	if(sx==-1||sx>x)sx=x-2;
+	if(sx==-1||sx>x2)sx=x2-2;
+	if(sy==-1||sy>y)sy=y-2;
+	if(sy==-1||sy>y2)sy=y2-2;
+	if(ex==-1||ex<x)ex=x+2;
+	if(ex==-1||ex<x2)ex=x2+2;
+	if(ey==-1||ey<y)ey=y+2;
+	if(ey==-1||ey<y2)ey=y2+2;
 }
 
 void backgroundshell(char string[]){
@@ -139,7 +139,8 @@ int touchnumfromdetail(int detail){
 }
 
 int stringtoint(char string[]){
-	int result=0,i,neg=0;
+	int result=0,neg=0;
+	unsigned int i;
 	for(i=0;i<strlen(string);i++){
 		if(string[i]==10)continue;
 		if(i==0 && string[i]=='-'){
@@ -500,8 +501,9 @@ int main(int argc, char **argv){
 								break;
 							d[0][tindex]=1;
 							r[0][tindex]=width;
-							tx[0][tindex]=xiev->event_x*sw/65535;
-							ty[0][tindex]=xiev->event_y*sh/65535;
+							tx[0][tindex]=xiev->event_x*sw/65535;//the max value of a touch axis seems to always be 65535 for libinput
+							ty[0][tindex]=xiev->event_y*sh/65535;//i have no idea how to get this programmatically
+							//my best guess would be to get the device id and search for Abs MT Position X and Abs MT Position Y in the valuators
 							mouseortouch=1;
 							break;
 						case XI_TouchEnd:
@@ -628,8 +630,8 @@ int main(int argc, char **argv){
 		
 		//clear the drawn areas
 		if(outputwindow!=0){
-			if(clearmethod==1 || clearmethod==3)
-				if(ex-sx!=0 && ey-sy!=0){
+			if(ex-sx!=0 || ey-sy!=0){
+				if(clearmethod==1 || clearmethod==3){
 					xev.x=sx;
 					xev.y=sy;
 					xev.width=ex-sx;
@@ -637,13 +639,12 @@ int main(int argc, char **argv){
 					XSendEvent(disp,window,False,ExposureMask,(XEvent*)&xev);
 					XFlush(disp);
 				}
-			if(clearmethod==2 || clearmethod==3){
-				if(ex-sx!=0 && ey-sy!=0){
+				if(clearmethod==2 || clearmethod==3){
 					XClearWindow(disp,window);
 					XClearArea(disp,window,sx,sy,ex-sx,ey-sy,True);
+					XFlush(disp);
 				}
 			}
-			XFlush(disp);
 		}
 	}
 	
