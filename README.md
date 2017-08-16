@@ -116,7 +116,7 @@ If a line does not start with one of the following options, it is ignored.
 
 # Issues / To do
 
-* Redraw events don't work, even with all the possible `clearmethod` values. This leads to the shapes drawn staying on screen until the application or the compositor redraws the screen.
+* While the maximum values for the touch coordinates under xinput2 seem to be always 65535 when using libinput as the x11 touchscreen driver, this is not always the case with other drivers like evdev. The application needs to programmatically find the maximum values for each device somehow.
 
 * Some applications implement their own version of this application's rightclickonhold. Possibly there could be a blacklist of which applications should be excluded from the gesture.  
 	This would require the application to figure out which window the cursor is currently over, get its application class, and compare that to a list.
