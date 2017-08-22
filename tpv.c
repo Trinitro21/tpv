@@ -35,6 +35,7 @@ int mousedevice=-1;//how do i get at that mouse
 int buttonlisten=1;//if xinput2 should the mouse buttons be listened to (if yes it will show mouse on the rightclickonhold)
 int rightclickonhold=1;//should the program simulate a rightclick if you hold for long enough
 int rightclicktime=1000;//how much time in milliseconds should the touch be held down for before a rightclick is triggered
+int rightclickonend=1;//whether to wait until the touch has been let go or do the rightclick immediately
 int shapechangeifrightclick=1;//if the shape of the touch visual should change if a rightclick will be triggered on touch lift
 int fps=60;//framerate so it aligns to your refresh rate hopefully
 int outputwindow=1;//0=none, 1=draw on root window, 2=draw on composite overlay window
@@ -227,6 +228,10 @@ void parseconfig(FILE * conf){
 			rightclickonhold=stringtoint(val);
 		if(strcmp("rightclicktime",name)==0)
 			rightclicktime=stringtoint(val);
+		if(strcmp("shapechangeifrightclick",name)==0)
+			shapechangeifrightclick=stringtoint(val);
+		if(strcmp("rightclickonend",name)==0)
+			rightclickonend=stringtoint(val);
 		if(strcmp("widthmult",name)==0)
 			widthmult=stringtoint(val);
 		if(strcmp("width",name)==0)
@@ -316,7 +321,7 @@ void draw(){//handles all of the actual drawing each frame
 				addtobound(tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,tx[0][i]+r[0][i]/2,ty[0][i]+r[0][i]/2);
 				//determin which shape the thing should be
 				ev=shape;
-				if(rightclickonhold && d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
+				if(rightclickonhold && rightclickonend && shapechangeifrightclick && d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
 					if(ev==0)
 						ev=1;
 					else if(ev==1)
@@ -328,15 +333,66 @@ void draw(){//handles all of the actual drawing each frame
 					XDrawRectangle(disp,window,gc,tx[0][i]-r[0][i]/2,ty[0][i]-r[0][i]/2,r[0][i],r[0][i]);
 			}
 			if(trail && (trailduringtap || !r[tlength-1][i])){//should it draw the trail
+				int flag=0;
 				for(j=traildispersion;j<tlength-1;j+=traildispersion){
 					if(!d[j][i])
 						break;
-					if(trailstartdistance>0)
+					if(!flag && trailstartdistance>0)
 						if(sqrt((double)((tx[j][i]-tx[0][i])*(tx[j][i]-tx[0][i])+(ty[j][i]-ty[0][i])*(ty[j][i]-ty[0][i])))<(double)trailstartdistance)//is it outside the start distance yet
 							continue;
 					if(!trailisshape){//draw a line
-						addtobound(tx[j-traildispersion][i],ty[j-traildispersion][i],tx[j][i],ty[j][i]);
-						XDrawLine(disp,window,gc,tx[j-traildispersion][i],ty[j-traildispersion][i],tx[j][i],ty[j][i]);
+						int startx=tx[j-traildispersion][i],starty=ty[j-traildispersion][i];
+						if(!flag && trailstartdistance>0){
+							//ok this is the line where j-traildispersion is inside the trailstartdistance and j is outside it
+							//so all this code is to truncate the line to only the part outside the circle
+							int dist1=sqrt((double)((tx[j][i]-tx[0][i])*(tx[j][i]-tx[0][i])+(ty[j][i]-ty[0][i])*(ty[j][i]-ty[0][i])))-(double)trailstartdistance;
+							int dist2=(double)trailstartdistance-sqrt((double)((tx[j-traildispersion][i]-tx[0][i])*(tx[j-traildispersion][i]-tx[0][i])+(ty[j-traildispersion][i]-ty[0][i])*(ty[j-traildispersion][i]-ty[0][i])));
+							int lenx=(tx[j][i]-tx[j-traildispersion][i]);
+							int leny=(ty[j][i]-ty[j-traildispersion][i]);
+							int len=sqrt((double)(lenx*lenx+leny*leny));
+							//dist1 is the distance along the line that's definitely outside the circle and dist2 is the distance from the other side that's definitely in the circle, i want the point that's on the circle so this narrows the options a bit
+							//lenx, leny, and len are used to store the line length
+							if(len>1){//don't even bother if it's not at least 1
+								if(abs(leny)>abs(lenx)){//use y as linear interpolation thing
+									int start=leny*dist2/len;
+									int end=leny*(len-dist1)/len;
+									if(start>end){
+										int stor=end;
+										end=start;
+										start=stor;
+									}
+									int it,xx=tx[j-traildispersion][i]+lenx*start/leny,yy=ty[j-traildispersion][i]+start;
+									//ok now just loop through every pixel and check the distance from the circle's center
+									for(it=start;it<end;it++){
+										xx=tx[j-traildispersion][i]+lenx*it/leny;//yay for linear interpolation
+										yy=ty[j-traildispersion][i]+it;
+										if(fabs(sqrt((double)((xx-tx[0][i])*(xx-tx[0][i])+(yy-ty[0][i])*(yy-ty[0][i])))-(double)trailstartdistance)<=(double)1)
+											break;//k this is a good place to stop
+									}
+									startx=xx;
+									starty=yy;
+								}else{//use x it's better
+									int start=lenx*dist2/len;
+									int end=lenx*(len-dist1)/len;
+									if(start>end){
+										int stor=end;
+										end=start;
+										start=stor;
+									}
+									int it,xx=tx[j-traildispersion][i]+start,yy=ty[j-traildispersion][i]+leny*start/lenx;
+									for(it=start;it<end;it++){
+										xx=tx[j-traildispersion][i]+it;
+										yy=ty[j-traildispersion][i]+leny*it/lenx;
+										if(fabs(sqrt((double)((xx-tx[0][i])*(xx-tx[0][i])+(yy-ty[0][i])*(yy-ty[0][i])))-(double)trailstartdistance)<=(double)1)
+											break;
+									}
+									startx=xx;
+									starty=yy;
+								}
+							}
+						}
+						addtobound(startx,starty,tx[j][i],ty[j][i]);
+						XDrawLine(disp,window,gc,startx,starty,tx[j][i],ty[j][i]);
 					}else{//draw a shape
 						addtobound(tx[j][i]-r[j][i]/2,ty[j][i]-r[j][i]/2,tx[j][i]+r[j][i]/2,ty[j][i]+r[j][i]/2);
 						if(trailshape==0)
@@ -344,6 +400,7 @@ void draw(){//handles all of the actual drawing each frame
 						if(trailshape==1)
 							XDrawRectangle(disp,window,gc,tx[j][i]-r[j][i]/2,ty[j][i]-r[j][i]/2,r[j][i],r[j][i]);
 					}
+					flag=1;
 				}
 			}
 		}
@@ -442,7 +499,7 @@ int main(int argc, char **argv){
 			fprintf(stderr,"XInput is too old to support touch\n");
 			exit(1);
 		}
-		XIEventMask xiem[2];
+		XIEventMask xiem[3];
 		XIEventMask *mask;
 		mask=&xiem[0];
 		mask->deviceid=((device==-1)?XIAllMasterDevices:device);
@@ -451,9 +508,17 @@ int main(int argc, char **argv){
 		XISetMask(mask->mask,XI_RawTouchBegin);
 		XISetMask(mask->mask,XI_RawTouchUpdate);
 		XISetMask(mask->mask,XI_RawTouchEnd);
+		mask=&xiem[1];
+		mask->deviceid=((device==-1)?XIAllDevices:device);
+		mask->mask_len=XIMaskLen(XI_LASTEVENT);
+		mask->mask=calloc(mask->mask_len,sizeof(char));
+		XISetMask(mask->mask,XI_TouchBegin);
+		XISetMask(mask->mask,XI_TouchUpdate);
+		XISetMask(mask->mask,XI_TouchEnd);
+		XISetMask(mask->mask,XI_TouchOwnership);
 		if(hidemouse==1){
 			if(mousedevice!=device){
-				mask=&xiem[1];
+				mask=&xiem[2];
 				mask->deviceid=((mousedevice==-1)?XIAllMasterDevices:mousedevice);
 				mask->mask_len=XIMaskLen(XI_LASTEVENT);
 				mask->mask=calloc(mask->mask_len,sizeof(char));
@@ -462,7 +527,7 @@ int main(int argc, char **argv){
 			if(buttonlisten)
 				XISetMask(mask->mask,XI_RawButtonPress);
 		}
-		XISelectEvents(disp,root,&xiem[0],((hidemouse==1 && mousedevice!=device)?2:1));
+		XISelectEvents(disp,root,&xiem[0],((hidemouse==1 && mousedevice!=device)?3:2));
 		XSync(disp,False);
 		tt=10;//just gonna uh do that
 		//i don't feel like learning how to scan devices and pick out the number of touches from stuff
@@ -651,7 +716,8 @@ int main(int argc, char **argv){
 		
 		//rightclick on tap hold
 		if(rightclickonhold){
-			if(!d[0][0] && d[1][0]){//if the touch was just let go
+			int cond=(rightclickonend?!d[0][0]:d[0][0]) && d[1][0];
+			if(cond){
 				//d[tlength-1][0] is the flag that means only the first finger has been held down the entire time
 				//r[tlength-1][0] is the flag that means the finger hasn't moved outside the tap threshold
 				//timestamps[0] is the stored time of the beginning of the touch
@@ -659,6 +725,7 @@ int main(int argc, char **argv){
 				if(d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
 					XTestFakeButtonEvent(disp,3,True,0);//rightclick down
 					XTestFakeButtonEvent(disp,3,False,0);//rightclick up
+					d[tlength-1][0]=0;
 				}
 			}
 		}
@@ -686,9 +753,9 @@ int main(int argc, char **argv){
 				if(clearmethod==1 || clearmethod==3){
 					xev.x=sx;
 					xev.y=sy;
-					xev.width=ex-sx;
-					xev.height=ey-sy;
-					XSendEvent(disp,window,False,ExposureMask,(XEvent*)&xev);
+					xev.width=ex-sx+1;
+					xev.height=ey-sy+1;
+					XSendEvent(disp,window,True,ExposureMask,(XEvent*)&xev);
 					XFlush(disp);
 				}
 				if(clearmethod==2 || clearmethod==3){
