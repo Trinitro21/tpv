@@ -55,6 +55,9 @@ If a line does not start with one of the following options, it is ignored.
 * `rightclicktime`  
 	The time interval, in milliseconds, a touch has to be held for in order for a rightclick to be generated when the finger is lifted.  
 	Default is 1000.
+* `rightclickonend`  
+	Whether to trigger the rightclick when the touch ends. If set to zero, the rightclick is triggered immediately when the time interval is reached.  
+	Default is 1.
 * `shapechangeifrightclick`  
 	Whether the shape of the current touch should change if a rightclick will be triggered when the finger is lifted.  
 	Default is 1.
