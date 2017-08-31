@@ -61,6 +61,9 @@ If a line does not start with one of the following options, it is ignored.
 * `shapechangeifrightclick`  
 	Whether the shape of the current touch should change if a rightclick will be triggered when the finger is lifted.  
 	Default is 1.
+* `rightclickontwofingertap`  
+	Whether a rightclick should be simulated if the user taps with two fingers.  
+	Default is 0.
 * `fixedwidth`  
 	Whether or not the point should use a fixed width or get touch size info from `ABS_MT_TOUCH_MAJOR`.  
 	Pressure sensitivity is not available when using XInput2 for input.  
