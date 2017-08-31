@@ -36,6 +36,7 @@ int buttonlisten=1;//if xinput2 should the mouse buttons be listened to (if yes 
 int rightclickonhold=1;//should the program simulate a rightclick if you hold for long enough
 int rightclicktime=1000;//how much time in milliseconds should the touch be held down for before a rightclick is triggered
 int rightclickonend=1;//whether to wait until the touch has been let go or do the rightclick immediately
+int rightclickontwofingertap=0;//if a rightclick should be triggered when the user taps with two fingers
 int shapechangeifrightclick=1;//if the shape of the touch visual should change if a rightclick will be triggered on touch lift
 int fps=60;//framerate so it aligns to your refresh rate hopefully
 int outputwindow=1;//0=none, 1=draw on root window, 2=draw on composite overlay window
@@ -232,6 +233,8 @@ void parseconfig(FILE * conf){
 			shapechangeifrightclick=stringtoint(val);
 		if(strcmp("rightclickonend",name)==0)
 			rightclickonend=stringtoint(val);
+		if(strcmp("rightclickontwofingertap",name)==0)
+			rightclickontwofingertap=stringtoint(val);
 		if(strcmp("widthmult",name)==0)
 			widthmult=stringtoint(val);
 		if(strcmp("width",name)==0)
@@ -716,8 +719,7 @@ int main(int argc, char **argv){
 		
 		//rightclick on tap hold
 		if(rightclickonhold){
-			int cond=(rightclickonend?!d[0][0]:d[0][0]) && d[1][0];
-			if(cond){
+			if((rightclickonend?!d[0][0]:d[0][0]) && d[1][0]){
 				//d[tlength-1][0] is the flag that means only the first finger has been held down the entire time
 				//r[tlength-1][0] is the flag that means the finger hasn't moved outside the tap threshold
 				//timestamps[0] is the stored time of the beginning of the touch
@@ -727,6 +729,14 @@ int main(int argc, char **argv){
 					XTestFakeButtonEvent(disp,3,False,0);//rightclick up
 					d[tlength-1][0]=0;
 				}
+			}
+		}
+		//rightclick on two finger tap
+		if(rightclickontwofingertap){
+			if(!d[0][0] && !d[0][1] && r[tlength-1][0] && r[tlength-1][1] && tstomsec(tsbuff)-tstomsec(timestamps[0])<(long)100 && tstomsec(tsbuff)-tstomsec(timestamps[1])<(long)100){
+				XTestFakeButtonEvent(disp,3,True,0);//rightclick down
+				XTestFakeButtonEvent(disp,3,False,0);//rightclick up
+				r[tlength-1][1]=0;//prevent it from happening more than once
 			}
 		}
 		
