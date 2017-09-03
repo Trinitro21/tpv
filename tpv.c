@@ -114,6 +114,10 @@ void addtobound(int x,int y,int x2,int y2){
 	if(ex==-1||ex<x2)ex=x2+2;
 	if(ey==-1||ey<y)ey=y+2;
 	if(ey==-1||ey<y2)ey=y2+2;
+	sx=sx>0?(sx<sw?sx:sw-1):0;
+	sy=sy>0?(sy<sh?sy:sh-1):0;
+	ex=ex>0?(ex<sw?ex:sw-1):0;
+	ey=ey>0?(ey<sh?ey:sh-1):0;
 }
 
 void backgroundshell(char string[]){//run a command in a fork
