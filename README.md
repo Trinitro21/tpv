@@ -64,6 +64,13 @@ If a line does not start with one of the following options, it is ignored.
 * `rightclickontwofingertap`  
 	Whether a rightclick should be simulated if the user taps with two fingers.  
 	Default is 0.
+* `rightclickmethod`  
+	Possibilities are `xtest` and `command`.  
+	Whether a rightclick should be simulated with XTest or with a user-defined command.  
+	Default is `xtest`.
+* `rightclickcommand`  
+	The command to run when executing a rightclick if `rightclickmethod` is set to `command`.  
+	Default is an empty string.
 * `fixedwidth`  
 	Whether or not the point should use a fixed width or get touch size info from `ABS_MT_TOUCH_MAJOR`.  
 	Pressure sensitivity is not available when using XInput2 for input.  
@@ -106,6 +113,9 @@ If a line does not start with one of the following options, it is ignored.
 	Possibilities are `circle` and `square`.  
 	Determines what shape the trail points should be if trailshape is 1.  
 	Default is `circle`.
+* `releasedecay`  
+	How many milliseconds to shrink the touch shape for when a touch is released.  
+	Default is 0.
 * `edgeswipethreshold`  
 	How far away from the edges of the screen a touch has to start to be considered an edge swipe.  
 	Default is 1.
