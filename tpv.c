@@ -37,6 +37,8 @@ int rightclickonhold=1;//should the program simulate a rightclick if you hold fo
 int rightclicktime=1000;//how much time in milliseconds should the touch be held down for before a rightclick is triggered
 int rightclickonend=1;//whether to wait until the touch has been let go or do the rightclick immediately
 int rightclickontwofingertap=0;//if a rightclick should be triggered when the user taps with two fingers
+int rightclickmethod=0;//0=xtest, 1=command
+char *rightclickcommand;//command to execute for a right click
 int shapechangeifrightclick=1;//if the shape of the touch visual should change if a rightclick will be triggered on touch lift
 int fps=60;//framerate so it aligns to your refresh rate hopefully
 int outputwindow=1;//0=none, 1=draw on root window, 2=draw on composite overlay window
@@ -45,6 +47,7 @@ int inputmethod=1;//0=libevdev, 1=XInput2
 char *edgeswipes[8];//top, bottom, left, right
 int edgeswipethreshold=1;//how many units away from the edge of the screen does the touch have to start at to be considered an edge swipe
 int edgeswipeextrapolate=1;//should the program extrapolate the touch at the frame before the first touch frame to determine if the touch is an edge swipe
+int releasedecay=0;//how many frames should it take for the shape to shrink before it disappears after the touch is over
 
 FILE * config;
 char *configpath="/.config/tpv";
@@ -214,8 +217,8 @@ void stringtoedgeswipes(char string[],int index){//just put the string into the 
 }
 
 void parseconfig(FILE * conf){
-	char configbuff[50],*name,*val,*buff;
-	while(fgets(configbuff,50,conf)!=NULL){
+	char configbuff[255],*name,*val,*buff;
+	while(fgets(configbuff,255,conf)!=NULL){
 		buff=configbuff;
 		if(!(name=strsep(&buff," ")))
 			continue;
@@ -239,6 +242,16 @@ void parseconfig(FILE * conf){
 			rightclickonend=stringtoint(val);
 		if(strcmp("rightclickontwofingertap",name)==0)
 			rightclickontwofingertap=stringtoint(val);
+		if(strcmp("rightclickmethod",name)==0){
+			if(strcmp("xtest",val)==0)
+				rightclickmethod=0;
+			else if(strcmp("command",val)==0)
+				rightclickmethod=1;
+		}
+		if(strcmp("rightclickcommand",name)==0){
+			rightclickcommand=malloc(strlen(val)+1);
+			strcpy(rightclickcommand,val);
+		}
 		if(strcmp("widthmult",name)==0)
 			widthmult=stringtoint(val);
 		if(strcmp("width",name)==0)
@@ -267,6 +280,8 @@ void parseconfig(FILE * conf){
 			traildispersion=stringtoint(val);
 		if(strcmp("trailisshape",name)==0)
 			trailisshape=stringtoint(val);
+		if(strcmp("releasedecay",name)==0)
+			releasedecay=stringtoint(val);
 		if(strcmp("trailshape",name)==0){
 			if(strcmp("circle",val)==0)
 				trailshape=0;
@@ -408,6 +423,27 @@ void draw(){//handles all of the actual drawing each frame
 							XDrawRectangle(disp,window,gc,tx[j][i]-r[j][i]/2,ty[j][i]-r[j][i]/2,r[j][i],r[j][i]);
 					}
 					flag=1;
+				}
+			}
+		}else{
+			if(releasedecay>0){
+				if(shapeaftertap || r[tlength-1][i]){
+					double progress=tstomsec(tsbuff)-tstomsec(timestamps[tt+i]);
+					if(progress<(double)releasedecay){
+						int radius=(int)(((double)r[0][i])*(1-progress/((double)releasedecay)));
+						addtobound(tx[0][i]-radius/2,ty[0][i]-radius/2,tx[0][i]+radius/2,ty[0][i]+radius/2);
+						ev=shape;
+						if(rightclickonhold && rightclickonend && shapechangeifrightclick && d[tlength-1][0] && r[tlength-1][0] && tstomsec(timestamps[tt])-tstomsec(timestamps[0])>(long)rightclicktime){
+							if(ev==0)
+								ev=1;
+							else if(ev==1)
+								ev=0;
+						}
+						if(ev==0)
+							XDrawArc(disp,window,gc,tx[0][i]-radius/2,ty[0][i]-radius/2,radius,radius,0,360*64);
+						if(ev==1)
+							XDrawRectangle(disp,window,gc,tx[0][i]-radius/2,ty[0][i]-radius/2,radius,radius);
+					}
 				}
 			}
 		}
@@ -554,7 +590,7 @@ int main(int argc, char **argv){
 	ty=init2d();//y
 	d=init2d();//is touched
 	r=init2d();//width
-	timestamps=calloc(tt,sizeof(struct timespec));
+	timestamps=calloc(tt*2,sizeof(struct timespec));//first tt indices are for touch start, last tt are for touch end
 	//on the last index, r will be used as a switch for tapthreshold and d will be used as a switch for detecting if only one button has been held for the entire touch
 	
 	if(clearmethod==1 || clearmethod==3){
@@ -580,7 +616,7 @@ int main(int argc, char **argv){
 	
 	while(1){
 		//get the time ok
-		if(rightclickonhold)
+		if(rightclickonhold || releasedecay>0)
 			if(clock_gettime(CLOCK_MONOTONIC,&tsbuff)!=0)
 				fprintf(stderr,"There was an error getting the current timestamp\n");
 		
@@ -644,13 +680,15 @@ int main(int argc, char **argv){
 		for(i=0;i<tt;i++){
 			//get the values if libevdev
 			if(inputmethod==0){
-				tx[0][i]=libevdev_get_slot_value(dev,i,53)*sw/tw;//get touch coordinatess
-				ty[0][i]=libevdev_get_slot_value(dev,i,54)*sh/th;
 				d[0][i]=(libevdev_get_slot_value(dev,i,57)!=-1);//is touch actually
-				if(fixedwidth==0){//if fixed width is off, adjust width
-					r[0][i]=libevdev_get_slot_value(dev,i,48)*widthmult;//what width is
-				}else{
-					r[0][i]=width;
+				if(d[0][i]){
+					tx[0][i]=libevdev_get_slot_value(dev,i,53)*sw/tw;//get touch coordinatess
+					ty[0][i]=libevdev_get_slot_value(dev,i,54)*sh/th;
+					if(fixedwidth==0){//if fixed width is off, adjust width
+						r[0][i]=libevdev_get_slot_value(dev,i,48)*widthmult;//what width is
+					}else{
+						r[0][i]=width;
+					}
 				}
 			}
 			if(d[0][i] && !d[1][i]){
@@ -661,6 +699,10 @@ int main(int argc, char **argv){
 				d[tlength-1][i]=d[0][i];
 				if(rightclickonhold)
 					timestamps[i]=tsbuff;
+			}
+			if(!d[0][i] && d[1][i]){
+				if(releasedecay>0)
+					timestamps[i+tt]=tsbuff;
 			}
 			if(d[0][i])//tap threshold
 				if(sqrt((double)((tx[0][i]-tx[tlength-1][i])*(tx[0][i]-tx[tlength-1][i])+(ty[0][i]-ty[tlength-1][i])*(ty[0][i]-ty[tlength-1][i])))>=(double)tapthreshold)//check tap threshold
@@ -677,21 +719,25 @@ int main(int argc, char **argv){
 			int exx=tx[1][0]-(edgeswipeextrapolate?tx[0][0]-tx[1][0]:0),//if edgeswipeextrapolate try to guess the touch at the frame before
 				exy=ty[1][0]-(edgeswipeextrapolate?ty[0][0]-ty[1][0]:0);//extrapolating the touch helps for faster swipes
 			es=0;
-			if(exy<=edgeswipethreshold){
-				es|=1;//set the flag so the program doesn't have to go through this again when the touch ends
-				backgroundshell(edgeswipes[0]);//then execute the configured command
+			if(!edgeswipeextrapolate || abs(ty[0][0]-ty[1][0])>=abs(tx[0][0]-tx[1][0])){//only check the edge if the swipe is mostly perpendicular to the edge
+				if(exy<=edgeswipethreshold){
+					es|=1;//set the flag so the program doesn't have to go through this again when the touch ends
+					backgroundshell(edgeswipes[0]);//then execute the configured command
+				}
+				if(exy>=sh-1-edgeswipethreshold){
+					es|=2;
+					backgroundshell(edgeswipes[1]);
+				}
 			}
-			if(exy>=sh-1-edgeswipethreshold){
-				es|=2;
-				backgroundshell(edgeswipes[1]);
-			}
-			if(exx<=edgeswipethreshold){
-				es|=4;
-				backgroundshell(edgeswipes[2]);
-			}
-			if(exx>=sw-1-edgeswipethreshold){
-				es|=8;
-				backgroundshell(edgeswipes[3]);
+			if(!edgeswipeextrapolate || abs(ty[0][0]-ty[1][0])<=abs(tx[0][0]-tx[1][0])){
+				if(exx<=edgeswipethreshold){
+					es|=4;
+					backgroundshell(edgeswipes[2]);
+				}
+				if(exx>=sw-1-edgeswipethreshold){
+					es|=8;
+					backgroundshell(edgeswipes[3]);
+				}
 			}
 		}
 		//end edge swipe gestures
@@ -729,17 +775,25 @@ int main(int argc, char **argv){
 				//timestamps[0] is the stored time of the beginning of the touch
 				//then just compare the difference in times to the rightclicktime setting
 				if(d[tlength-1][0] && r[tlength-1][0] && tstomsec(tsbuff)-tstomsec(timestamps[0])>(long)rightclicktime){
-					XTestFakeButtonEvent(disp,3,True,0);//rightclick down
-					XTestFakeButtonEvent(disp,3,False,0);//rightclick up
+					if(rightclickmethod==0){
+						XTestFakeButtonEvent(disp,3,True,0);//rightclick down
+						XTestFakeButtonEvent(disp,3,False,0);//rightclick up
+					}else{
+						backgroundshell(rightclickcommand);
+					}
 					d[tlength-1][0]=0;
 				}
 			}
 		}
 		//rightclick on two finger tap
 		if(rightclickontwofingertap){
-			if(!d[0][0] && !d[0][1] && r[tlength-1][0] && r[tlength-1][1] && tstomsec(tsbuff)-tstomsec(timestamps[0])<(long)100 && tstomsec(tsbuff)-tstomsec(timestamps[1])<(long)100){
-				XTestFakeButtonEvent(disp,3,True,0);//rightclick down
-				XTestFakeButtonEvent(disp,3,False,0);//rightclick up
+			if(!d[0][0] && !d[0][1] && !d[0][2] && r[tlength-1][0] && r[tlength-1][1] && tstomsec(tsbuff)-tstomsec(timestamps[0])<(long)100 && tstomsec(tsbuff)-tstomsec(timestamps[1])<(long)100 && tstomsec(tsbuff)-tstomsec(timestamps[2])>500){
+				if(rightclickmethod==0){
+					XTestFakeButtonEvent(disp,3,True,0);//rightclick down
+					XTestFakeButtonEvent(disp,3,False,0);//rightclick up
+				}else{
+					backgroundshell(rightclickcommand);
+				}
 				r[tlength-1][1]=0;//prevent it from happening more than once
 			}
 		}
