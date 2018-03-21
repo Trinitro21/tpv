@@ -46,6 +46,9 @@ If a line does not start with one of the following options, it is ignored.
 * `buttonlisten`  
 	When `rightclickonhold` is activated, the mouse button press can cause the mouse to be shown. This option simply sets whether mouse buttons should be detected when `inputmethod` is `xinput2`.  
 	Default is 1.
+* `mousedelay`  
+	If touch and mouse events are fired alternately, this could make the mouse flicker. This option sets the minimum number of frames of only mouse events for the cursor to be shown.  
+	Default is 2.
 * `mousedevice`  
 	The device to capture mouse events from. Only used if `hidemouse` is 1 and `inputmethod` is `libevdev`.  
 	Default is -1.
@@ -133,4 +136,23 @@ If a line does not start with one of the following options, it is ignored.
 # Issues / To do
 
 * Some applications implement their own version of this application's rightclickonhold. Possibly there could be a blacklist of which applications should be excluded from the gesture.  
-	This would require the application to figure out which window the cursor is currently over, get its application class, and compare that to a list.
+	This would require the application to figure out which window the cursor is currently over, get its application class, and compare that to a list.  
+	This can be worked around by using the `rightclickcommand` option and this bash script:  
+	```
+	#!/bin/bash
+	blacklist=(chromium-browser) #space-separated list of window classes
+	eval $(xdotool getmouselocation --shell)
+	if [[ "$WINDOW" == "0" ]]; then
+		exit 0
+	fi
+	windowname=`xprop -id $WINDOW WM_CLASS |cut -d " " -f3|sed -e 's/"\([^"]\+\)".*/\1/'`
+	shouldclick=true
+	for i in "${blacklist[@]}"; do
+		if [[ "$i" == "$windowname" ]]; then
+			shouldclick=false
+		fi
+	done
+	if $shouldclick; then
+		xdotool click 3
+	fi
+	```

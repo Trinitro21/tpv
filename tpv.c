@@ -48,6 +48,7 @@ char *edgeswipes[8];//top, bottom, left, right
 int edgeswipethreshold=1;//how many units away from the edge of the screen does the touch have to start at to be considered an edge swipe
 int edgeswipeextrapolate=1;//should the program extrapolate the touch at the frame before the first touch frame to determine if the touch is an edge swipe
 int releasedecay=0;//how many frames should it take for the shape to shrink before it disappears after the touch is over
+int mousedelay=2;//how many frames of exclusively mouse movement before the mouse is shown, used when the mouse flickers
 
 FILE * config;
 char *configpath="/.config/tpv";
@@ -92,7 +93,7 @@ int **tmax;//for storing device max values in xinput2
 struct timespec *timestamps,tsbuff;
 int es;//flags for edgeswipes so it can tell on the last frame of a touch if the touch was an edge swipe ok
 
-int mouseortouch=0,mouseortouchprev=0;//0=mouse,1=touch
+int mouseortouch=0,mouseortouchprev=0;//0=mouse,mousedelay=touch
 
 int sx,sy,ex,ey;//things of redraw area
 
@@ -228,6 +229,8 @@ void parseconfig(FILE * conf){
 			device=stringtoint(val);
 		if(strcmp("hidemouse",name)==0)
 			hidemouse=stringtoint(val);
+		if(strcmp("mousedelay",name)==0)
+			mousedelay=stringtoint(val);
 		if(strcmp("mousedevice",name)==0)
 			mousedevice=stringtoint(val);
 		if(strcmp("buttonlisten",name)==0)
@@ -626,12 +629,12 @@ int main(int argc, char **argv){
 				do{//make sure libevdev is completely updated on the mouse events
 					ev=libevdev_next_event(devmouse,LIBEVDEV_READ_FLAG_NORMAL,&e);
 					if(ev==0)
-						mouseortouch=0;
+						mouseortouch=mouseortouchprev-1;
 				}while(ev==0);//these events aren't actually used, rather the events just trigger the mouse being shown if there are no touch events on the same frame
 			do{//make sure libevdev is completely updated on the device events
 				ev=libevdev_next_event(dev,LIBEVDEV_READ_FLAG_NORMAL,&e);
 				if(ev==0)
-					mouseortouch=1;
+					mouseortouch=mousedelay;
 			}while(ev==0);
 		}else if(inputmethod==1){
 			while(XPending(disp)){
@@ -642,21 +645,26 @@ int main(int argc, char **argv){
 						case XI_RawButtonPress:
 						case XI_RawMotion:
 							if(xevent.xcookie.evtype==XI_RawMotion || (xevent.xcookie.evtype==XI_RawButtonPress && (xiev->detail==1 || xiev->detail==2 || xiev->detail==3)))
-								mouseortouch=0;
+								if(mouseortouch==mouseortouchprev)
+									mouseortouch=mouseortouchprev-1;
 							break;
 						case XI_TouchBegin:
 						case XI_TouchUpdate:
 							if((tindex=touchnumfromdetail(xiev->detail))<0)
 								break;
+							if(tindex>=tt)
+								break;
 							d[0][tindex]=1;
 							r[0][tindex]=width;
 							tx[0][tindex]=xiev->event_x;
 							ty[0][tindex]=xiev->event_y;
-							mouseortouch=1;
+							mouseortouch=mousedelay;
 							break;
 						case XI_RawTouchBegin:
 						case XI_RawTouchUpdate:
 							if((tindex=touchnumfromdetail(xiev->detail))<0)
+								break;
+							if(tindex>=tt)
 								break;
 							int xmax,ymax;
 							touchmax(xiev->sourceid,&xmax,&ymax);
@@ -664,11 +672,13 @@ int main(int argc, char **argv){
 							r[0][tindex]=width;
 							tx[0][tindex]=xiev->event_x*sw/xmax;
 							ty[0][tindex]=xiev->event_y*sh/ymax;
-							mouseortouch=1;
+							mouseortouch=mousedelay;
 							break;
 						case XI_TouchEnd:
 						case XI_RawTouchEnd:
 							if((tindex=touchnumfromdetail(xiev->detail))<0)
+								break;
+							if(tindex>=tt)
 								break;
 							d[0][tindex]=0;
 							break;
@@ -753,11 +763,13 @@ int main(int argc, char **argv){
 				backgroundshell(edgeswipes[7]);
 		}
 		
+		if(mouseortouch<0)
+			mouseortouch=0;
 		//hide/show mouse
 		if(hidemouse){
-			if(mouseortouch && !mouseortouchprev)
+			if(mouseortouch==mousedelay && mouseortouchprev==0)
 				XFixesHideCursor(disp,window);
-			if(!mouseortouch && mouseortouchprev)
+			if(mouseortouch==0 && mouseortouchprev!=0)
 				XFixesShowCursor(disp,window);
 		}
 		
